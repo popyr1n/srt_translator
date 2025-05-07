@@ -1,9 +1,3 @@
-// wrangler.toml: убедитесь, что у вас есть binding для API_KEY
-// [vars]
-// API_KEY = "AIzaSyCeFVnLS2qTMrHngnf_OKwQCEosIV4AGws"
-// PROJECT_ID = "7558111673:AAF5QK7rbhCl6UAk0by1k5HJaFGoioRAKQE"
-// LOCATION = "us-central1"
-
 addEventListener("fetch", event => {
   event.respondWith(handle(event.request));
 });
@@ -13,17 +7,11 @@ async function handle(request) {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  // 1. Читаем multipart/form-data
-  const contentType = request.headers.get("content-type") || "";
-  if (!contentType.includes("multipart/form-data")) {
-    return new Response("Expected multipart/form-data", { status: 400 });
+  // 1. Читаем весь SRT как простой текст
+  const srt = await request.text();
+  if (!srt) {
+    return new Response("Empty body", { status: 400 });
   }
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!file) {
-    return new Response("Missing file field", { status: 400 });
-  }
-  const srt = await file.text();
 
   // 2. Парсим SRT в массив сегментов
   const items = srt.trim()
@@ -36,16 +24,17 @@ async function handle(request) {
       return { idx, start, end, text: textLines };
     });
 
-  // 3. Готовим батч для AI (склеиваем все тексты через |||)
+  // 3. Склеиваем батч для отправки AI
   const batchedText = items.map(it => it.text.join("|||")).join("|||");
 
-  // 4. Вызываем Gemini (Vertex AI) для перевода
-  const projectId = PROJECT_ID;   // берётся из wrangler.toml
+  // 4. Собираем URL для Vertex AI (Gemini)
+  const projectId = PROJECT_ID;   // из wrangler.toml
   const location  = LOCATION;     // тоже из wrangler.toml
-  const apiKey    = API_KEY;      // и этот
+  const apiKey    = API_KEY;      // переменная окружения
   const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
               `/locations/${location}/publishers/google/models/text-bison:predict?key=${apiKey}`;
 
+  // 5. Делаем запрос к AI
   const aiResp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -57,21 +46,21 @@ async function handle(request) {
     })
   });
   if (!aiResp.ok) {
-    const errText = await aiResp.text();
-    return new Response(`AI Error: ${errText}`, { status: 502 });
+    const err = await aiResp.text();
+    return new Response(`AI Error: ${err}`, { status: 502 });
   }
   const aiJson = await aiResp.json();
   const translated = aiJson.predictions[0].content.split("|||");
 
-  // 5. Встраиваем переводы обратно в структуру items
+  // 6. Встраиваем перевод обратно в структуру
   const result = items.map((it, i) => ({
     idx:   it.idx,
     start: it.start,
     end:   it.end,
-    text:  translated[i].split("\n")
+    text:  translated[i].split(/\r?\n/)  // разбиваем обратно по строкам
   }));
 
-  // 6. Отдаём готовый JSON
+  // 7. Отдаём JSON
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" }
   });
