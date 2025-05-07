@@ -1,0 +1,10 @@
+name = "srt-translator"
+main = "index.js"
+compatibility_date = "2025-01-01"
+account_id = "ВАШ_ACCOUNT_ID"
+[[vars]]
+API_KEY = "ваш_GEMINI_API_KEY"
+[[vars]]
+PROJECT_ID = "ваш_PROJECT_ID"
+[[vars]]
+LOCATION = "us-central1"
